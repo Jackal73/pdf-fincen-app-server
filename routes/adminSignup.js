@@ -4,16 +4,6 @@ const jwt = require("jsonwebtoken");
 const { sendVerificationEmail } = require("../utils/email");
 const router = express.Router();
 
-// TEMPORARY DEBUG ROUTE: List all admin users in the database
-router.get("/admin/debug-list-admins", async (req, res) => {
-  try {
-    const admins = await AdminUser.find({});
-    res.json(admins);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch admin users" });
-  }
-});
-
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
 const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
 

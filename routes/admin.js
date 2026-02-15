@@ -20,17 +20,6 @@ const upload = multer({
   },
 });
 
-// List all template files in pdf-templates directory
-router.get("/list-templates", (req, res) => {
-  fs.readdir(templatesDir, (err, files) => {
-    if (err) {
-      return res.status(500).json({ error: "Failed to list templates" });
-    }
-    // Only return PDF files
-    const pdfs = files.filter((f) => f.toLowerCase().endsWith(".pdf"));
-    res.json({ templates: pdfs });
-  });
-});
 // Admin-only delete endpoint for template PDFs
 router.delete("/admin/delete-template/:filename", async (req, res) => {
   // Decode URI to handle spaces and special characters

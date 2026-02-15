@@ -157,7 +157,6 @@ router.post("/upload-fincen", upload.single("file"), async (req, res) => {
 router.get("/my-uploads", async (req, res) => {
   try {
     const db = mongoose.connection.db;
-    const bucket = new GridFSBucket(db, { bucketName: "pdfs" });
 
     // Get files sorted by uploadDate descending (newest first)
     const files = await db
