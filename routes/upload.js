@@ -4,6 +4,9 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const { GridFSBucket } = require("mongodb");
 const router = express.Router();
+const pdfParse = require("pdf-parse");
+const FincenFormData = require("../models/FincenFormData");
+const { sendUploadConfirmation } = require("../utils/email");
 
 // Delete an uploaded PDF by file ID
 router.delete("/delete-upload/:id", async (req, res) => {
@@ -20,8 +23,6 @@ router.delete("/delete-upload/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to delete file" });
   }
 });
-const pdfParse = require("pdf-parse");
-const FincenFormData = require("../models/FincenFormData");
 
 // Download and decrypt an uploaded PDF by file ID
 router.get("/download-upload/:id", async (req, res) => {
@@ -78,9 +79,12 @@ const upload = multer({
 const ALGORITHM = "aes-256-cbc";
 const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, "hex");
 const IV_LENGTH = 16;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.post("/upload-fincen", upload.single("file"), async (req, res) => {
   try {
+    const sender =
+      typeof req.body.sender === "string" ? req.body.sender.trim() : null;
     const fileData = req.file.buffer;
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
@@ -93,7 +97,9 @@ router.post("/upload-fincen", upload.single("file"), async (req, res) => {
     // Save encrypted Buffer to MongoDB GridFS
     const db = mongoose.connection.db;
     const bucket = new GridFSBucket(db, { bucketName: "pdfs" });
-    const uploadStream = bucket.openUploadStream(req.file.originalname);
+    const uploadStream = bucket.openUploadStream(req.file.originalname, {
+      metadata: { sender: sender || null },
+    });
     uploadStream.end(encrypted);
 
     uploadStream.on("finish", async () => {
@@ -117,10 +123,23 @@ router.post("/upload-fincen", upload.single("file"), async (req, res) => {
           fileId: uploadStream.id,
           filename: req.file.originalname,
           fields,
+          uploadedBy: sender,
         });
       } catch (err) {
         // Ignore DB error, file upload still succeeds
       }
+
+      // Send confirmation email to sender if provided
+      if (sender && EMAIL_REGEX.test(sender)) {
+        try {
+          await sendUploadConfirmation(sender, req.file.originalname);
+          console.log(`✓ Confirmation email sent to ${sender}`);
+        } catch (emailErr) {
+          console.error("Failed to send confirmation email:", emailErr.message);
+          // Don't fail upload if email fails
+        }
+      }
+
       res.status(200).json({
         message: "File uploaded and encrypted successfully",
         fileId: uploadStream.id,
@@ -134,18 +153,33 @@ router.post("/upload-fincen", upload.single("file"), async (req, res) => {
   }
 });
 
-// List all uploaded PDFs (for demo, lists all files; add user filtering if needed)
+// List all uploaded PDFs (sorted by newest first with sender info)
 router.get("/my-uploads", async (req, res) => {
   try {
     const db = mongoose.connection.db;
     const bucket = new GridFSBucket(db, { bucketName: "pdfs" });
-    const files = await db.collection("pdfs.files").find({}).toArray();
-    const uploads = files.map((file) => ({
-      id: file._id,
-      filename: file.filename,
-      uploadDate: file.uploadDate,
-    }));
-    res.json({ uploads });
+
+    // Get files sorted by uploadDate descending (newest first)
+    const files = await db
+      .collection("pdfs.files")
+      .find({})
+      .sort({ uploadDate: -1 })
+      .toArray();
+
+    // Get sender information from FincenFormData
+    const uploadsWithSender = await Promise.all(
+      files.map(async (file) => {
+        const formData = await FincenFormData.findOne({ fileId: file._id });
+        return {
+          id: file._id,
+          filename: file.filename,
+          uploadDate: file.uploadDate,
+          sender: formData?.uploadedBy || file.metadata?.sender || "Unknown",
+        };
+      }),
+    );
+
+    res.json({ uploads: uploadsWithSender });
   } catch (error) {
     res.status(500).json({ error: "Failed to list uploads" });
   }
