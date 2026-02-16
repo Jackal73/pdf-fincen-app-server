@@ -1,65 +1,95 @@
 const express = require("express");
 const AdminUser = require("../models/AdminUser");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const { sendVerificationEmail } = require("../utils/email");
+const { validateSignup, validateEmailVerify } = require("../utils/validation");
 const router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET is required");
+}
 const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
 
 // Signup route
-router.post("/admin/signup", async (req, res) => {
-  const { email, password } = req.body;
+router.post(
+  "/admin/signup",
+  (req, res, next) => {
+    // Get the signup limiter from app's rate limiters
+    const signupLimiter = req.app.rateLimiters.signup;
+    signupLimiter(req, res, next);
+  },
+  validateSignup, // Strict input validation (password requirements, email format)
+  async (req, res) => {
+    const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email and password required" });
-  }
+    try {
+      // Check if user already exists
+      const existing = await AdminUser.findOne({ email });
+      if (existing) {
+        // Use generic error message to prevent user enumeration
+        return res
+          .status(400)
+          .json({
+            error: "Signup failed, please try again or contact support",
+          });
+      }
 
-  try {
-    // Check if user already exists
-    const existing = await AdminUser.findOne({ email });
-    if (existing) {
-      return res.status(400).json({ error: "Email already registered" });
+      // Create verification token
+      const verifyToken = jwt.sign({ email }, JWT_SECRET, { expiresIn: "1d" });
+
+      // Hash password with salt before saving
+      const passwordHash = await bcrypt.hash(password, 12);
+
+      // Save new user (not verified yet)
+      const newUser = new AdminUser({
+        email,
+        password: passwordHash,
+        verified: false,
+      });
+      await newUser.save();
+
+      // Send verification email
+      await sendVerificationEmail(email, verifyToken, BASE_URL);
+
+      res.json({ message: "Signup successful, check your email to verify." });
+    } catch (err) {
+      console.error("Admin signup error:", err);
+      const message =
+        process.env.NODE_ENV === "production"
+          ? "Failed to signup or send verification email"
+          : `Failed to signup or send verification email: ${err.message}`;
+      res.status(500).json({ error: message });
     }
-
-    // Create verification token
-    const verifyToken = jwt.sign({ email }, JWT_SECRET, { expiresIn: "1d" });
-
-    // Save new user (not verified yet)
-    const newUser = new AdminUser({ email, password, verified: false });
-    await newUser.save();
-
-    // Send verification email
-    await sendVerificationEmail(email, verifyToken, BASE_URL);
-
-    res.json({ message: "Signup successful, check your email to verify." });
-  } catch (err) {
-    console.error("Admin signup error:", err);
-    const message =
-      process.env.NODE_ENV === "production"
-        ? "Failed to signup or send verification email"
-        : `Failed to signup or send verification email: ${err.message}`;
-    res.status(500).json({ error: message });
-  }
-});
+  },
+);
 
 // Email verification route
-router.get("/admin/verify", async (req, res) => {
-  const { token } = req.query;
+router.get(
+  "/admin/verify",
+  validateEmailVerify, // Strict token validation
+  (req, res, next) => {
+    // Get the verify limiter from app's rate limiters
+    const verifyLimiter = req.app.rateLimiters.verify;
+    verifyLimiter(req, res, next);
+  },
+  async (req, res) => {
+    const { token } = req.query;
 
-  try {
-    const { email } = jwt.verify(token, JWT_SECRET);
-    const user = await AdminUser.findOne({ email });
+    try {
+      const { email } = jwt.verify(token, JWT_SECRET);
+      const user = await AdminUser.findOne({ email });
 
-    if (!user) {
-      return res.status(400).send("User not found");
-    }
+      if (!user) {
+        return res.status(400).send("User not found");
+      }
 
-    user.verified = true;
-    await user.save();
+      user.verified = true;
+      await user.save();
 
-    // Show success page
-    res.send(`
+      // Show success page
+      res.send(`
       <!DOCTYPE html>
       <html lang="en">
         <head>
@@ -78,9 +108,9 @@ router.get("/admin/verify", async (req, res) => {
         </body>
       </html>
     `);
-  } catch (err) {
-    console.error("Email verification error:", err);
-    res.status(400).send(`
+    } catch (err) {
+      console.error("Email verification error:", err);
+      res.status(400).send(`
       <!DOCTYPE html>
       <html lang="en">
         <head>
@@ -97,7 +127,54 @@ router.get("/admin/verify", async (req, res) => {
         </body>
       </html>
     `);
-  }
-});
+    }
+  },
+);
+
+// Resend verification email route - helps users who haven't verified yet
+router.post(
+  "/admin/resend-verification",
+  (req, res, next) => {
+    // Get the verify limiter from app's rate limiters
+    const verifyLimiter = req.app.rateLimiters.verify;
+    verifyLimiter(req, res, next);
+  },
+  async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    try {
+      const user = await AdminUser.findOne({ email });
+
+      // Use generic message to prevent user enumeration
+      if (!user || user.verified) {
+        return res.status(200).json({
+          message:
+            "If an unverified account exists, a verification email will be sent.",
+        });
+      }
+
+      // Create new verification token
+      const verifyToken = jwt.sign({ email }, JWT_SECRET, { expiresIn: "1d" });
+
+      // Send verification email
+      await sendVerificationEmail(email, verifyToken, BASE_URL);
+
+      res.json({
+        message: "Verification email sent! Check your inbox and spam folder.",
+      });
+    } catch (err) {
+      console.error("Resend verification error:", err);
+      const message =
+        process.env.NODE_ENV === "production"
+          ? "Failed to resend verification email"
+          : `Failed to resend verification email: ${err.message}`;
+      res.status(500).json({ error: message });
+    }
+  },
+);
 
 module.exports = router;
