@@ -77,6 +77,12 @@ router.get(
   requireAdmin,
   validateFileId,
   async (req, res) => {
+    console.log(
+      "[DEBUG] Download endpoint called for fileId:",
+      req.params.id,
+      "admin:",
+      req.user?.email,
+    );
     try {
       const db = mongoose.connection.db;
       const bucket = new GridFSBucket(db, { bucketName: "pdfs" });
@@ -88,10 +94,56 @@ router.get(
       if (!files.length)
         return res.status(404).json({ error: "File not found" });
 
+      // Mark as downloaded by this admin
+      let adminEmail = req.user?.email;
+      if (adminEmail) {
+        adminEmail = adminEmail.toLowerCase();
+        const FincenFormData = require("../models/FincenFormData");
+        let form = await FincenFormData.findOne({ fileId });
+        const now = new Date();
+        if (!form) {
+          // Try to get filename from files[0]
+          const filename = files[0]?.filename || "";
+          // Optionally, try to get uploadedBy from file metadata or set to null
+          const uploadedBy = files[0]?.metadata?.sender || null;
+          form = await FincenFormData.create({
+            fileId,
+            filename,
+            uploadDate: now,
+            uploadedBy,
+            downloadedBy: [{ email: adminEmail, date: now }],
+          });
+          console.log(
+            "[Download] Created FincenFormData for",
+            fileId,
+            "admin:",
+            adminEmail,
+          );
+        } else {
+          // Only add if not already present
+          const alreadyDownloaded = (form.downloadedBy || []).some(
+            (entry) =>
+              entry && entry.email && entry.email.toLowerCase() === adminEmail,
+          );
+          if (!alreadyDownloaded) {
+            await FincenFormData.updateOne(
+              { fileId },
+              { $push: { downloadedBy: { email: adminEmail, date: now } } },
+            );
+            console.log(
+              "[Download] Marked as downloaded for",
+              fileId,
+              "admin:",
+              adminEmail,
+            );
+          }
+        }
+      }
+
       const downloadStream = bucket.openDownloadStream(fileId);
       let chunks = [];
       downloadStream.on("data", (chunk) => chunks.push(chunk));
-      downloadStream.on("end", () => {
+      downloadStream.on("end", async () => {
         const encrypted = Buffer.concat(chunks);
         // Decrypt
         const iv = encrypted.slice(0, IV_LENGTH);
@@ -106,6 +158,32 @@ router.get(
           "Content-Disposition",
           `attachment; filename=\"${files[0].filename}\"`,
         );
+        // For debugging: fetch the updated FincenFormData and log
+        try {
+          const FincenFormData = require("../models/FincenFormData");
+          let adminEmail = req.user?.email;
+          if (adminEmail) adminEmail = adminEmail.toLowerCase();
+          const form = await FincenFormData.findOne({ fileId });
+          const checked = !!(
+            form &&
+            form.downloadedBy &&
+            form.downloadedBy
+              .map((e) => e && e.toLowerCase())
+              .includes(adminEmail)
+          );
+          console.log(
+            "[Download END] fileId:",
+            fileId,
+            "admin:",
+            adminEmail,
+            "checked:",
+            checked,
+            "downloadedBy:",
+            form?.downloadedBy,
+          );
+        } catch (e) {
+          console.log("[Download END] Debug error:", e);
+        }
         res.send(decrypted);
       });
       downloadStream.on("error", () => {
@@ -252,24 +330,47 @@ router.get("/my-uploads", requireAdmin, async (req, res) => {
     // Batch fetch form data for all files
     const fileIds = files.map((f) => f._id);
     const formDataMap = new Map();
+    const checkedMap = new Map();
+    let adminEmail = req.user?.email;
+    if (adminEmail) adminEmail = adminEmail.toLowerCase();
     if (fileIds.length > 0) {
       const formDataList = await FincenFormData.find(
         { fileId: { $in: fileIds } },
-        { fileId: 1, uploadedBy: 1 },
+        { fileId: 1, uploadedBy: 1, downloadedBy: 1 },
       ).lean();
       formDataList.forEach((fd) => {
         formDataMap.set(String(fd.fileId), fd.uploadedBy);
+        checkedMap.set(String(fd.fileId), fd.downloadedBy || []);
       });
     }
 
     // Build response
-    const uploadsWithSender = files.map((file) => ({
-      id: file._id,
-      filename: file.filename,
-      uploadDate: file.uploadDate,
-      sender:
-        formDataMap.get(String(file._id)) || file.metadata?.sender || "Unknown",
-    }));
+    const uploadsWithSender = files.map((file) => {
+      const downloadedByArr = checkedMap.get(String(file._id)) || [];
+      let checked = false;
+      let downloadedAt = null;
+      if (adminEmail && Array.isArray(downloadedByArr)) {
+        const found = downloadedByArr.find(
+          (entry) =>
+            entry && entry.email && entry.email.toLowerCase() === adminEmail,
+        );
+        if (found) {
+          checked = true;
+          downloadedAt = found.date || null;
+        }
+      }
+      return {
+        id: file._id.toString(),
+        filename: file.filename,
+        uploadDate: file.uploadDate,
+        sender:
+          formDataMap.get(String(file._id)) ||
+          file.metadata?.sender ||
+          "Unknown",
+        checked: !!checked,
+        downloadedAt,
+      };
+    });
 
     res.json({ uploads: uploadsWithSender });
   } catch (error) {

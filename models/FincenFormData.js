@@ -10,6 +10,12 @@ const fincenFormDataSchema = new mongoose.Schema({
   uploadDate: { type: Date, default: Date.now },
   fields: [{ name: String, value: String }],
   uploadedBy: { type: String }, // Optionally store user email or ID
+  downloadedBy: [
+    {
+      email: { type: String },
+      date: { type: Date, default: Date.now },
+    },
+  ], // Array of { email, date }
 });
 
 module.exports = mongoose.model("FincenFormData", fincenFormDataSchema);
