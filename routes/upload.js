@@ -164,23 +164,12 @@ router.get(
           let adminEmail = req.user?.email;
           if (adminEmail) adminEmail = adminEmail.toLowerCase();
           const form = await FincenFormData.findOne({ fileId });
-          const checked = !!(
-            form &&
-            form.downloadedBy &&
-            form.downloadedBy
-              .map((e) => e && e.toLowerCase())
-              .includes(adminEmail)
-          );
           console.log(
-            "[Download END] fileId:",
-            fileId,
-            "admin:",
-            adminEmail,
-            "checked:",
-            checked,
-            "downloadedBy:",
-            form?.downloadedBy,
+            "[DEBUG] DownloadedBy log for fileId:",
+            fileId.toString(),
           );
+          console.log("[DEBUG] Admin email:", adminEmail);
+          console.log("[DEBUG] downloadedBy array:", form?.downloadedBy);
         } catch (e) {
           console.log("[Download END] Debug error:", e);
         }
