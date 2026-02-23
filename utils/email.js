@@ -166,10 +166,10 @@ Need help? Contact ${EMAIL_FROM}.
  * Send upload confirmation email to sender
  */
 const sendUploadConfirmation = async (senderEmail, filename) => {
-  const appName = "FinCEN PDF Filler";
-  const subject = `PDF Form Upload Confirmation - ${appName}`;
+  const appName = "PDF Encryption Suite";
+  const subject = `FinCEN PDF Upload Confirmation - ${appName}`;
 
-  const text = `Your FinCEN PDF form has been successfully uploaded.
+  const text = `A FinCEN PDF form has been successfully uploaded.
 
 Filename: ${filename}
 Upload Date: ${new Date().toLocaleString()}
@@ -180,14 +180,7 @@ Your document has been securely encrypted and stored. Thank you for using ${appN
 If you did not upload this document, please contact ${EMAIL_FROM} immediately.
 `;
 
-  const logoHtml = logoDataUri
-    ? `
-      <div style="display:flex; align-items:center; gap:12px;">
-        <img src="${logoDataUri}" alt="${appName} logo" width="120" style="display:block; height:auto;" />
-        <div style="font-size:18px; font-weight:700; color:#0f172a;">${appName}</div>
-      </div>
-    `
-    : `<div style="font-size:18px; font-weight:700; color:#0f172a;">${appName}</div>`;
+  const logoHtml = `<div style="font-size:24px; font-weight:700; color:#0f172a;">${appName}</div>`;
 
   const html = `
     <!DOCTYPE html>
@@ -199,7 +192,7 @@ If you did not upload this document, please contact ${EMAIL_FROM} immediately.
       </head>
       <body style="margin:0; background:#f1f5f9; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color:#0f172a;">
         <div style="display:none; max-height:0; overflow:hidden; opacity:0;">
-          Your FinCEN PDF form has been successfully uploaded and encrypted.
+          A FinCEN PDF form has been successfully uploaded and encrypted.
         </div>
         <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f1f5f9; padding:32px 12px;">
           <tr>
@@ -207,7 +200,7 @@ If you did not upload this document, please contact ${EMAIL_FROM} immediately.
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:560px; background:#ffffff; border-radius:16px; box-shadow:0 10px 30px rgba(15, 23, 42, 0.08); overflow:hidden;">
                 <tr>
                   <td style="padding:28px 32px; background:linear-gradient(135deg, #dcfce7, #f0fdf4); border-bottom:1px solid #bbf7d0;">
-                    ${logoHtml}
+                    <div style="font-size:18px; font-weight:700; color:#0f172a;">${appName}</div>
                     <div style="font-size:12px; letter-spacing:1.5px; text-transform:uppercase; color:#16a34a; margin-top:4px;">Upload Confirmation</div>
                   </td>
                 </tr>
@@ -215,7 +208,7 @@ If you did not upload this document, please contact ${EMAIL_FROM} immediately.
                   <td style="padding:32px;">
                     <h1 style="margin:0 0 12px; font-size:22px; line-height:1.3; color:#0f172a;">✓ Upload Successful</h1>
                     <p style="margin:0 0 18px; font-size:15px; color:#334155;">
-                      Your FinCEN PDF form has been successfully uploaded and securely encrypted.
+                      A FinCEN PDF form has been successfully uploaded and securely encrypted.
                     </p>
                     <div style="background:#f8fafc; border-left:4px solid #22c55e; padding:16px; margin:20px 0; border-radius:6px;">
                       <p style="margin:0 0 8px; font-size:14px; color:#64748b;"><strong style="color:#0f172a;">Filename:</strong> ${filename}</p>
@@ -223,11 +216,11 @@ If you did not upload this document, please contact ${EMAIL_FROM} immediately.
                       <p style="margin:0; font-size:14px; color:#64748b;"><strong style="color:#0f172a;">Status:</strong> <span style="color:#16a34a; font-weight:600;">Encrypted and Stored</span></p>
                     </div>
                     <p style="margin:0 0 10px; font-size:13px; color:#64748b;">
-                      Your document has been securely encrypted using AES-256 encryption and stored in our database.
+                      The document has been securely encrypted using AES-256 encryption and stored in our database.
                     </p>
-                    <p style="margin:0; font-size:13px; color:#64748b;">
-                      If you did not upload this document, please contact <a href="mailto:${EMAIL_FROM}" style="color:#2563eb; text-decoration:none;">${EMAIL_FROM}</a> immediately.
-                    </p>
+                    // <p style="margin:0; font-size:13px; color:#64748b;">
+                    //   If you did not upload this document, please contact <a href="mailto:${EMAIL_FROM}" style="color:#2563eb; text-decoration:none;">${EMAIL_FROM}</a> immediately.
+                    // </p>
                   </td>
                 </tr>
                 <tr>
