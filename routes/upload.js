@@ -309,72 +309,70 @@ router.post(
 // List all uploaded PDFs (sorted by newest first with sender info)
 router.get("/my-uploads", requireAdmin, async (req, res) => {
   try {
-    const db = mongoose.connection.db;
-
-    // Get files sorted by uploadDate descending with lean projection
-    const files = await db
-      .collection("pdfs.files")
-      .find(
-        {},
-        { projection: { _id: 1, filename: 1, uploadDate: 1, metadata: 1 } },
-      )
-      .sort({ uploadDate: -1 })
-      .toArray();
-
-    // Batch fetch form data for all files
-    const fileIds = files.map((f) => f._id);
-    const formDataMap = new Map();
-    const checkedMap = new Map();
     let adminEmail = req.user?.email;
     if (adminEmail) adminEmail = adminEmail.toLowerCase();
-    if (fileIds.length > 0) {
-      const formDataList = await FincenFormData.find(
-        { fileId: { $in: fileIds } },
-        { fileId: 1, uploadedBy: 1, recipient: 1, downloadedBy: 1 },
+    let formDataList;
+    if (adminEmail === "shawn@freedom-title.com") {
+      // Shawn sees all uploads
+      formDataList = await FincenFormData.find(
+        {},
+        {
+          fileId: 1,
+          filename: 1,
+          uploadDate: 1,
+          downloadedBy: 1,
+          uploadedBy: 1,
+          fields: 1,
+        },
       ).lean();
-      formDataList.forEach((fd) => {
-        formDataMap.set(String(fd.fileId), {
-          uploadedBy: fd.uploadedBy,
-          recipient: fd.recipient,
-        });
-        checkedMap.set(String(fd.fileId), fd.downloadedBy || []);
-      });
+    } else {
+      // Other admins see only their own uploads
+      formDataList = await FincenFormData.find(
+        {
+          uploadedBy: { $regex: new RegExp(`^${adminEmail}$`, "i") },
+        },
+        {
+          fileId: 1,
+          filename: 1,
+          uploadDate: 1,
+          downloadedBy: 1,
+          uploadedBy: 1,
+          fields: 1,
+        },
+      ).lean();
     }
-
-    // Build response
-    const uploadsWithSender = files.map((file) => {
-      const formData = formDataMap.get(String(file._id)) || {};
-      const downloadedByArr = checkedMap.get(String(file._id)) || [];
-      let checked = false;
-      let downloadedAt = null;
-      if (adminEmail && Array.isArray(downloadedByArr)) {
-        const found = downloadedByArr.find(
-          (entry) =>
-            entry && entry.email && entry.email.toLowerCase() === adminEmail,
-        );
-        if (found) {
-          checked = true;
-          downloadedAt = found.date || null;
+    const db = mongoose.connection.db;
+    // Get file info for each upload
+    const uploadsForAdmin = await Promise.all(
+      formDataList.map(async (fd) => {
+        const file = await db
+          .collection("pdfs.files")
+          .findOne({ _id: fd.fileId });
+        const downloadedByArr = fd.downloadedBy || [];
+        let checked = false;
+        let downloadedAt = null;
+        if (adminEmail && Array.isArray(downloadedByArr)) {
+          const found = downloadedByArr.find(
+            (entry) =>
+              entry && entry.email && entry.email.toLowerCase() === adminEmail,
+          );
+          if (found) {
+            checked = true;
+            downloadedAt = found.date || null;
+          }
         }
-      }
-      return {
-        id: file._id.toString(),
-        filename: file.filename,
-        uploadDate: file.uploadDate,
-        sender: formData.uploadedBy || file.metadata?.sender || "Unknown",
-        recipient: formData.recipient || null,
-        checked: !!checked,
-        downloadedAt,
-      };
-    });
-
-    // Filter uploads: show only those where recipient matches adminEmail
-    const filteredUploads = uploadsWithSender.filter(
-      (u) =>
-        u.recipient && adminEmail && u.recipient.toLowerCase() === adminEmail,
+        return {
+          id: fd.fileId.toString(),
+          filename: fd.filename || (file && file.filename) || "Unknown",
+          uploadDate: fd.uploadDate || (file && file.uploadDate) || null,
+          uploadedBy: fd.uploadedBy,
+          fields: fd.fields || [],
+          checked,
+          downloadedAt,
+        };
+      }),
     );
-
-    res.json({ uploads: filteredUploads });
+    res.json({ uploads: uploadsForAdmin });
   } catch (error) {
     res.status(500).json({ error: "Failed to list uploads" });
   }
