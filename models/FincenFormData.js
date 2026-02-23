@@ -10,6 +10,7 @@ const fincenFormDataSchema = new mongoose.Schema({
   uploadDate: { type: Date, default: Date.now },
   fields: [{ name: String, value: String }],
   uploadedBy: { type: String }, // Optionally store user email or ID
+  recipient: { type: String }, // Admin email the upload is intended for
   downloadedBy: [
     {
       email: { type: String },

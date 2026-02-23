@@ -217,6 +217,10 @@ router.post(
     try {
       const sender =
         typeof req.body.sender === "string" ? req.body.sender.trim() : null;
+      const recipient =
+        typeof req.body.recipient === "string"
+          ? req.body.recipient.trim()
+          : null;
       if (!req.file) {
         return res.status(400).json({ error: "PDF file is required" });
       }
@@ -233,7 +237,7 @@ router.post(
       const db = mongoose.connection.db;
       const bucket = new GridFSBucket(db, { bucketName: "pdfs" });
       const uploadStream = bucket.openUploadStream(req.file.originalname, {
-        metadata: { sender: sender || null },
+        metadata: { sender: sender || null, recipient: recipient || null },
       });
       uploadStream.end(encrypted);
 
@@ -259,6 +263,7 @@ router.post(
             filename: req.file.originalname,
             fields,
             uploadedBy: sender,
+            recipient: recipient,
           });
         } catch (err) {
           // Ignore DB error, file upload still succeeds
@@ -325,16 +330,20 @@ router.get("/my-uploads", requireAdmin, async (req, res) => {
     if (fileIds.length > 0) {
       const formDataList = await FincenFormData.find(
         { fileId: { $in: fileIds } },
-        { fileId: 1, uploadedBy: 1, downloadedBy: 1 },
+        { fileId: 1, uploadedBy: 1, recipient: 1, downloadedBy: 1 },
       ).lean();
       formDataList.forEach((fd) => {
-        formDataMap.set(String(fd.fileId), fd.uploadedBy);
+        formDataMap.set(String(fd.fileId), {
+          uploadedBy: fd.uploadedBy,
+          recipient: fd.recipient,
+        });
         checkedMap.set(String(fd.fileId), fd.downloadedBy || []);
       });
     }
 
     // Build response
     const uploadsWithSender = files.map((file) => {
+      const formData = formDataMap.get(String(file._id)) || {};
       const downloadedByArr = checkedMap.get(String(file._id)) || [];
       let checked = false;
       let downloadedAt = null;
@@ -352,16 +361,20 @@ router.get("/my-uploads", requireAdmin, async (req, res) => {
         id: file._id.toString(),
         filename: file.filename,
         uploadDate: file.uploadDate,
-        sender:
-          formDataMap.get(String(file._id)) ||
-          file.metadata?.sender ||
-          "Unknown",
+        sender: formData.uploadedBy || file.metadata?.sender || "Unknown",
+        recipient: formData.recipient || null,
         checked: !!checked,
         downloadedAt,
       };
     });
 
-    res.json({ uploads: uploadsWithSender });
+    // Filter uploads: show only those where recipient matches adminEmail
+    const filteredUploads = uploadsWithSender.filter(
+      (u) =>
+        u.recipient && adminEmail && u.recipient.toLowerCase() === adminEmail,
+    );
+
+    res.json({ uploads: filteredUploads });
   } catch (error) {
     res.status(500).json({ error: "Failed to list uploads" });
   }
